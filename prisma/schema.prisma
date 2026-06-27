@@ -1,0 +1,158 @@
+// Prisma schema — Subs (self-hostable subscription tracker)
+// Single-user app; subscription tracking, payroll, currencies, notifications.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---- Owner (single user) ----
+model User {
+  id                     String    @id @default(cuid())
+  email                  String    @unique
+  passwordHash           String
+  // AES-256-GCM encrypted base64 (see lib/crypto.ts). null until 2FA enabled.
+  totpSecretCipher       String?
+  twoFactorEnabled       Boolean   @default(false)
+  // bcrypt-style hash of one-time backup codes (8 codes, stored hashed).
+  backupCodesHash        String[]
+  displayCurrencyId      String?
+  displayCurrency        Currency? @relation("UserDisplayCurrency", fields: [displayCurrencyId], references: [id])
+  telegramChatId         String?
+  // AES-256-GCM encrypted bot token (null until configured via Settings).
+  telegramBotTokenCipher String?
+  telegramNotifyUpcoming Boolean   @default(true)
+  telegramNotifyPaid     Boolean   @default(true)
+  telegramNotifyPayroll  Boolean   @default(true)
+  telegramNotifySummary  Boolean   @default(true)
+  // days ahead to notify: stored as string e.g. "1,3"
+  telegramNotifyDays     String    @default("1,3")
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+}
+
+model Currency {
+  id                 String   @id @default(cuid())
+  code               String   @unique // TRY, EUR, RUB, USD ...
+  symbol             String
+  isBase             Boolean  @default(false)
+  // user can override an exchange rate snapshot
+  overrideRateToBase Decimal? // optional manual multiplier to base currency
+  createdAt          DateTime @default(now())
+
+  exchangeRateBase    ExchangeRate[]  @relation("Base")
+  exchangeRateQuote   ExchangeRate[]  @relation("Quote")
+  subscriptions       Subscription[]
+  salaryPayments      SalaryPayment[]
+  userDisplayCurrency User[]          @relation("UserDisplayCurrency")
+}
+
+model ExchangeRate {
+  id        String   @id @default(cuid())
+  baseId    String
+  quoteId   String
+  rate      Decimal
+  date      DateTime @db.Date
+  fetchedAt DateTime @default(now())
+
+  base  Currency @relation("Base", fields: [baseId], references: [id])
+  quote Currency @relation("Quote", fields: [quoteId], references: [id])
+
+  @@unique([baseId, quoteId, date])
+}
+
+model Group {
+  id        String   @id @default(cuid())
+  name      String
+  color     String   @default("#64748b")
+  // optional icon name (lucide) - stored as string
+  icon      String?
+  createdAt DateTime @default(now())
+
+  subscriptions SubscriptionGroup[]
+}
+
+model Subscription {
+  id              String    @id @default(cuid())
+  title           String
+  url             String?
+  faviconUrl      String?
+  amount          Decimal
+  currencyId      String
+  currency        Currency  @relation(fields: [currencyId], references: [id])
+  billingCycle    String // MONTHLY | QUARTERLY | YEARLY | CUSTOM
+  billingEvery    Int       @default(1) // every N units (MONTHLY every 1,3,6 etc.)
+  billingUnitDays Int? // for CUSTOM: number of days per cycle
+  nextPaymentDate DateTime
+  startDate       DateTime
+  endDate         DateTime?
+  notes           String?
+  active          Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  groups SubscriptionGroup[]
+
+  @@index([nextPaymentDate])
+  @@index([active])
+}
+
+model SubscriptionGroup {
+  subscriptionId String
+  groupId        String
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  group        Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([subscriptionId, groupId])
+}
+
+model Employee {
+  id        String   @id @default(cuid())
+  name      String
+  position  String?
+  contact   String?
+  notes     String?
+  createdAt DateTime @default(now())
+
+  salaryPayments SalaryPayment[]
+}
+
+model SalaryPayment {
+  id          String   @id @default(cuid())
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  amount      Decimal
+  currencyId  String
+  currency    Currency @relation(fields: [currencyId], references: [id])
+  paidAt      DateTime
+  periodLabel String // "Оклад за июнь 2026"
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  @@index([paidAt])
+}
+
+model FaviconCache {
+  id          String   @id @default(cuid())
+  domain      String   @unique
+  faviconUrl  String
+  contentType String?
+  blob        Bytes?
+  fetchedAt   DateTime @default(now())
+}
+
+model AuditLog {
+  id     String   @id @default(cuid())
+  action String // LOGIN_OK, LOGIN_2FA_FAIL, SUBSCRIPTION_CREATE, ...
+  entity String?
+  meta   Json?
+  at     DateTime @default(now())
+  ip     String?
+
+  @@index([at])
+}

@@ -1,0 +1,48 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-subs}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-strong-pw}
+      POSTGRES_DB: ${POSTGRES_DB:-subs}
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    networks:
+      - subsnet
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-subs}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # NOT published to host in production — only reachable from app on the
+    # internal network. For local dev against the same data, use the
+    # docker-compose.dev.yml override, which exposes 127.0.0.1:5433.
+
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-subs}:${POSTGRES_PASSWORD:-change-me-strong-pw}@db:5432/${POSTGRES_DB:-subs}?schema=public
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+    # Bind ONLY to loopback on the host; reverse proxy fronts it.
+    ports:
+      - "127.0.0.1:${APP_PORT:-3001}:3000"
+    networks:
+      - subsnet
+
+volumes:
+  dbdata:
+
+networks:
+  subsnet:
+    driver: bridge

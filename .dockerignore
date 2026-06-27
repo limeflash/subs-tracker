@@ -1,0 +1,23 @@
+# Keep secrets and build artifacts out of the Docker build context.
+# Without this, `COPY . .` in the builder stage ships .env (real secrets),
+# node_modules, .next, etc. into build cache layers — which can leak if the
+# image is inspected or pushed to a registry.
+
+.env
+.env.*
+!.env.example
+.git
+.gitignore
+.github
+.claude
+.next
+node_modules
+dist
+tsconfig.tsbuildinfo
+*.log
+.DS_Store
+npm-debug.log*
+Dockerfile
+.dockerignore
+docker-compose*.yml
+README.md

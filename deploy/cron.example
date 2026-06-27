@@ -1,0 +1,12 @@
+# Host crontab entries for the Subs app.
+# Install: crontab -e, then paste (replace SECRET and your-domain.example).
+#
+# Daily 09:07 — notifications (upcoming/past/summary/payroll)
+7 9 * * * /usr/bin/curl -fsS -H "x-cron-secret: SECRET" https://your-domain.example/api/cron/notify >/dev/null
+#
+# Daily 03:13 — refresh exchange rates
+13 3 * * * /usr/bin/curl -fsS -H "x-cron-secret: SECRET" https://your-domain.example/api/cron/rates >/dev/null
+#
+# Daily 02:30 — encrypted DB backup (placeholder: fill in your sink).
+# See DEPLOY.md "Backups" section — implementation deferred per project decision.
+# 30 2 * * * /path/to/backup-script.sh
