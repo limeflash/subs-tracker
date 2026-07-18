@@ -7,6 +7,23 @@ export interface TelegramConfig {
   chatId: string;
 }
 
+export interface InlineButton {
+  text: string;
+  callback_data: string;
+}
+
+export interface TgMessage {
+  message_id: number;
+  chat: { id: number };
+  text?: string;
+}
+
+export interface TgUpdate {
+  update_id: number;
+  message?: TgMessage;
+  callback_query?: { id: string; data?: string; message?: TgMessage };
+}
+
 /** Load + decrypt the owner's Telegram config. Returns null if not configured. */
 export async function getTelegramConfig(): Promise<TelegramConfig | null> {
   const user = await prisma.user.findFirst();
@@ -19,33 +36,96 @@ export async function getTelegramConfig(): Promise<TelegramConfig | null> {
   }
 }
 
+/** Low-level Bot API call. Returns result payload or null on failure. */
+export async function tgCall<T = unknown>(
+  cfg: TelegramConfig,
+  method: string,
+  body: Record<string, unknown>,
+  timeoutMs = 10000,
+): Promise<T | null> {
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${cfg.botToken}/${method}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json?.ok) return null;
+    return json.result as T;
+  } catch {
+    return null;
+  }
+}
+
 /** Send a message via Bot API. Best-effort with one retry. */
-export async function sendTelegram(text: string, opts?: { parseMode?: "HTML" | "MarkdownV2" }): Promise<boolean> {
+export async function sendTelegram(
+  text: string,
+  opts?: { parseMode?: "HTML" | "MarkdownV2"; keyboard?: InlineButton[][] },
+): Promise<boolean> {
   const cfg = await getTelegramConfig();
   if (!cfg) return false;
-  const url = `https://api.telegram.org/bot${cfg.botToken}/sendMessage`;
   for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: cfg.chatId,
-          text,
-          parse_mode: opts?.parseMode ?? "HTML",
-          disable_web_page_preview: true,
-        }),
-        signal: AbortSignal.timeout(10000),
-      });
-      if (res.ok) return true;
-      const body = await res.json().catch(() => null);
-      // 401/404 = bad token/chat — no point retrying
-      if (res.status === 401 || res.status === 404) return false;
-    } catch {
-      /* retry */
-    }
+    const r = await tgCall(cfg, "sendMessage", {
+      chat_id: cfg.chatId,
+      text,
+      parse_mode: opts?.parseMode ?? "HTML",
+      disable_web_page_preview: true,
+      ...(opts?.keyboard ? { reply_markup: { inline_keyboard: opts.keyboard } } : {}),
+    });
+    if (r !== null) return true;
   }
   return false;
+}
+
+export async function getUpdates(cfg: TelegramConfig, offset: number, timeoutSec: number): Promise<TgUpdate[] | null> {
+  const r = await tgCall<TgUpdate[]>(
+    cfg,
+    "getUpdates",
+    {
+      offset,
+      timeout: timeoutSec,
+      allowed_updates: ["message", "callback_query"],
+    },
+    timeoutSec * 1000 + 8000,
+  );
+  if (r === null) return null;
+  return Array.isArray(r) ? r : [];
+}
+
+export async function answerCallback(cfg: TelegramConfig, id: string, text?: string): Promise<void> {
+  await tgCall(cfg, "answerCallbackQuery", { callback_query_id: id, ...(text ? { text } : {}) });
+}
+
+export async function editMessage(
+  cfg: TelegramConfig,
+  chatId: string | number,
+  messageId: number,
+  text: string,
+  keyboard?: InlineButton[][],
+): Promise<void> {
+  await tgCall(cfg, "editMessageText", {
+    chat_id: chatId,
+    message_id: messageId,
+    text,
+    parse_mode: "HTML",
+    disable_web_page_preview: true,
+    ...(keyboard && keyboard.length > 0 ? { reply_markup: { inline_keyboard: keyboard } } : { reply_markup: { inline_keyboard: [] } }),
+  });
+}
+
+/** Publish the command list shown in Telegram's "/" menu. */
+export async function setMyCommands(cfg: TelegramConfig): Promise<void> {
+  await tgCall(cfg, "setMyCommands", {
+    commands: [
+      { command: "upcoming", description: "Списания на 7 дней" },
+      { command: "today", description: "Списания сегодня" },
+      { command: "overdue", description: "Просроченные" },
+      { command: "paid", description: "Отметить оплату" },
+      { command: "month", description: "Расходы за месяц" },
+      { command: "help", description: "Список команд" },
+    ],
+  });
 }
 
 /** Validate a bot token by calling /getMe. Returns the bot username on success. */

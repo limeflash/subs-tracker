@@ -45,7 +45,9 @@ export function TelegramTab(props: Props) {
       <Card className="max-w-xl">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">Telegram <Badge variant="secondary">настроен</Badge></CardTitle>
-          <CardDescription>chat_id: {props.chatId}</CardDescription>
+          <CardDescription>
+            chat_id: {props.chatId} · бот принимает команды: /upcoming, /today, /paid, /month, /help
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-3 rounded-md border p-3">

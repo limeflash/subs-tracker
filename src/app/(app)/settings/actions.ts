@@ -11,7 +11,7 @@ import {
   generateTotpSecret, buildOtpAuthUri, verifyTotp,
   generateBackupCodes, hashBackupCode,
 } from "@/lib/totp";
-import { validateBotToken, sendTelegram } from "@/lib/telegram";
+import { validateBotToken, sendTelegram, setMyCommands } from "@/lib/telegram";
 import { fetchAndStoreRates } from "@/lib/fetch-rates";
 import { runNotifications } from "@/lib/notify";
 
@@ -170,6 +170,8 @@ export async function saveTelegram(_prev: SettingsState | undefined, formData: F
       telegramNotifyDays: parsed.data.notifyDays ?? "1,3",
     },
   });
+  // publish the "/" command menu for the new bot (best-effort)
+  await setMyCommands({ botToken: parsed.data.botToken, chatId: parsed.data.chatId }).catch(() => null);
   await audit("TELEGRAM_UPDATE", { entity: user.id });
   revalidatePath("/settings");
   return { ok: true };

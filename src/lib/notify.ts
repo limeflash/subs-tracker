@@ -53,7 +53,12 @@ export async function runNotifications(now = new Date()): Promise<{
           : d === 1
             ? "⏰ Списание <b>завтра</b>:"
             : `⏰ Списание через <b>${d} ${pluralDays(d)}</b>:`;
-      const ok = await sendTelegram(`${header}\n${lines.join("\n")}`);
+      const ok = await sendTelegram(`${header}\n${lines.join("\n")}`, {
+        keyboard:
+          d === 0
+            ? subs.slice(0, 10).map((s) => [{ text: `✅ ${s.title}`, callback_data: `paid:d:${s.id}` }])
+            : undefined,
+      });
       if (ok) {
         sent = true;
         if (d === 0) dueTodayCount += subs.length;

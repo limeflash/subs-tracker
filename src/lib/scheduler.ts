@@ -1,5 +1,6 @@
 import { runNotifications } from "@/lib/notify";
 import { fetchAndStoreRates } from "@/lib/fetch-rates";
+import { startBotPolling } from "@/lib/bot";
 
 /**
  * In-process scheduler so Telegram notifications work out of the box, without
@@ -37,5 +38,6 @@ export function startScheduler(): void {
   // first tick shortly after boot, then on the interval
   setTimeout(tick, 20_000);
   setInterval(tick, TICK_MS).unref();
-  console.log("[scheduler] started (15 min tick, daily notify from 09:00)");
+  startBotPolling();
+  console.log("[scheduler] started (15 min tick, daily notify from 09:00, bot polling)");
 }
