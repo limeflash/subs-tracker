@@ -28,7 +28,10 @@ export interface TgUpdate {
 
 /** Load + decrypt the owner's Telegram config. Returns null if not configured. */
 export async function getTelegramConfig(): Promise<TelegramConfig | null> {
-  const user = await prisma.user.findFirst();
+  const user = await prisma.user.findFirst({
+    where: { telegramBotTokenCipher: { not: null }, telegramChatId: { not: null } },
+    orderBy: { createdAt: "asc" },
+  });
   if (!user?.telegramBotTokenCipher || !user?.telegramChatId) return null;
   try {
     const token = decrypt(user.telegramBotTokenCipher);

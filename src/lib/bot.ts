@@ -75,7 +75,8 @@ async function pollLoop(): Promise<void> {
       }
       for (const u of updates) {
         offset = u.update_id + 1;
-        await handleUpdate(u, cfg).catch(() => null);
+        console.log("[bot] update:", u.message?.text ?? (u.message?.photo ? "<photo>" : u.callback_query?.data ?? "?"));
+        await handleUpdate(u, cfg).catch((e) => console.error("[bot] handle error:", e));
       }
     } catch {
       await sleep(5_000);

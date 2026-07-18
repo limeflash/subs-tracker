@@ -28,7 +28,10 @@ const HOST = "https://ollama.com";
 const DEFAULT_MODEL = "qwen3.5:122b";
 
 export async function getAiConfig(): Promise<AiConfig | null> {
-  const user = await prisma.user.findFirst();
+  const user = await prisma.user.findFirst({
+    where: { aiApiKeyCipher: { not: null } },
+    orderBy: { createdAt: "asc" },
+  });
   if (user?.aiApiKeyCipher) {
     try {
       return { apiKey: decrypt(user.aiApiKeyCipher), model: user.aiModel || DEFAULT_MODEL };
@@ -37,7 +40,10 @@ export async function getAiConfig(): Promise<AiConfig | null> {
     }
   }
   const envKey = process.env.OLLAMA_API_KEY;
-  if (envKey) return { apiKey: envKey, model: user?.aiModel || DEFAULT_MODEL };
+  if (envKey) {
+    const anyUser = await prisma.user.findFirst({ orderBy: { createdAt: "asc" } });
+    return { apiKey: envKey, model: anyUser?.aiModel || DEFAULT_MODEL };
+  }
   return null;
 }
 

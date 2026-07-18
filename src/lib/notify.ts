@@ -11,7 +11,10 @@ import { formatMoney, formatDate } from "@/lib/utils";
 export async function runNotifications(now = new Date()): Promise<{
   upcoming: number; dueToday: number; past: number; summary: boolean; sent: boolean;
 }> {
-  const user = await prisma.user.findFirst();
+  const user = await prisma.user.findFirst({
+    where: { telegramBotTokenCipher: { not: null }, telegramChatId: { not: null } },
+    orderBy: { createdAt: "asc" },
+  });
   if (!user?.telegramBotTokenCipher || !user.telegramChatId) {
     return { upcoming: 0, dueToday: 0, past: 0, summary: false, sent: false };
   }
