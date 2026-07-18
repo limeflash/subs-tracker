@@ -10,9 +10,19 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { CreditCard, Users, Download } from "lucide-react";
 import { formatMoney } from "@/lib/utils";
 
-const PIE_COLORS = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#3b82f6", "#a855f7", "#14b8a6", "#f97316"];
+const PIE_COLORS = [
+  "hsl(var(--chart-1))",
+  "hsl(var(--chart-2))",
+  "hsl(var(--chart-3))",
+  "hsl(var(--chart-4))",
+  "hsl(var(--chart-5))",
+  "#a855f7",
+  "#14b8a6",
+  "#f97316",
+];
 
 interface Props {
   period: string;
@@ -87,8 +97,12 @@ export function StatsView(props: Props) {
           />
         </div>
         <div className="ml-auto flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => exportData("csv")}>CSV</Button>
-          <Button variant="outline" size="sm" onClick={() => exportData("json")}>JSON</Button>
+          <Button variant="outline" size="sm" onClick={() => exportData("csv")}>
+            <Download className="mr-1.5 h-3.5 w-3.5" /> CSV
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => exportData("json")}>
+            <Download className="mr-1.5 h-3.5 w-3.5" /> JSON
+          </Button>
         </div>
       </div>
 
@@ -100,31 +114,68 @@ export function StatsView(props: Props) {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
-          <CardHeader><CardTitle>Расходы: подписки vs ЗП</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">Расходы: подписки vs ЗП</CardTitle></CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={compareData}>
-                <XAxis dataKey="name" />
-                <YAxis />
-                <Tooltip formatter={(v: number) => formatMoney(v, props.displayCode)} />
-                <Bar dataKey="value" radius={[4, 4, 0, 0]} />
+              <BarChart data={compareData} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+                <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 12 }} />
+                <YAxis hide domain={[0, "dataMax"]} />
+                <Tooltip
+                  cursor={{ fill: "hsl(var(--muted))", opacity: 0.4 }}
+                  content={({ active, payload }) =>
+                    active && payload?.length ? (
+                      <div className="rounded-lg border bg-popover px-3 py-1.5 text-sm shadow-md">
+                        <span className="font-medium">{payload[0].payload.name}</span>
+                        <span className="ml-2 tabular-nums text-muted-foreground">
+                          {formatMoney(Number(payload[0].value), props.displayCode)}
+                        </span>
+                      </div>
+                    ) : null
+                  }
+                />
+                <Bar dataKey="value" radius={[8, 8, 0, 0]} maxBarSize={72}>
+                  {compareData.map((d, i) => (
+                    <Cell key={d.name} fill={PIE_COLORS[i === 0 ? 0 : 2]} />
+                  ))}
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
         <Card>
-          <CardHeader><CardTitle>Подписки по группам</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">Подписки по группам</CardTitle></CardHeader>
           <CardContent>
             {props.byGroup.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Нет данных</p>
+              <p className="flex h-[280px] items-center justify-center text-sm text-muted-foreground">Нет данных</p>
             ) : (
               <ResponsiveContainer width="100%" height={280}>
                 <PieChart>
-                  <Pie data={props.byGroup} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label>
-                    {props.byGroup.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                  <Pie
+                    data={props.byGroup}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={62}
+                    outerRadius={92}
+                    paddingAngle={3}
+                    strokeWidth={0}
+                  >
+                    {props.byGroup.map((g, i) => <Cell key={g.name} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
                   </Pie>
-                  <Tooltip formatter={(v: number) => formatMoney(v, props.displayCode)} />
-                  <Legend />
+                  <Tooltip
+                    content={({ active, payload }) =>
+                      active && payload?.length ? (
+                        <div className="rounded-lg border bg-popover px-3 py-1.5 text-sm shadow-md">
+                          <span className="font-medium">{payload[0].name}</span>
+                          <span className="ml-2 tabular-nums text-muted-foreground">
+                            {formatMoney(Number(payload[0].value), props.displayCode)}
+                          </span>
+                        </div>
+                      ) : null
+                    }
+                  />
+                  <Legend iconType="circle" iconSize={8} formatter={(v: string) => <span className="text-xs text-muted-foreground">{v}</span>} />
                 </PieChart>
               </ResponsiveContainer>
             )}
@@ -134,17 +185,31 @@ export function StatsView(props: Props) {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
-          <CardHeader><CardTitle>Итог подписок</CardTitle></CardHeader>
-          <CardContent>
-            <p className="text-3xl font-bold">{props.subTotal == null ? "—" : formatMoney(props.subTotal, props.displayCode)}</p>
-            <p className="text-sm text-muted-foreground">{props.subRows.length} списаний</p>
+          <CardContent className="flex items-center gap-4 p-5">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 shadow-md shadow-indigo-500/25">
+              <CreditCard className="h-5 w-5 text-white" strokeWidth={2.2} />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-muted-foreground">Итог подписок</p>
+              <p className="text-2xl font-bold tabular-nums tracking-tight">
+                {props.subTotal == null ? "—" : formatMoney(props.subTotal, props.displayCode)}
+              </p>
+              <p className="text-xs text-muted-foreground">{props.subRows.length} списаний</p>
+            </div>
           </CardContent>
         </Card>
         <Card>
-          <CardHeader><CardTitle>Итог ЗП</CardTitle></CardHeader>
-          <CardContent>
-            <p className="text-3xl font-bold">{props.payTotal == null ? "—" : formatMoney(props.payTotal, props.displayCode)}</p>
-            <p className="text-sm text-muted-foreground">{props.payRows.length} выплат</p>
+          <CardContent className="flex items-center gap-4 p-5">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 shadow-md shadow-amber-500/25">
+              <Users className="h-5 w-5 text-white" strokeWidth={2.2} />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-muted-foreground">Итог ЗП</p>
+              <p className="text-2xl font-bold tabular-nums tracking-tight">
+                {props.payTotal == null ? "—" : formatMoney(props.payTotal, props.displayCode)}
+              </p>
+              <p className="text-xs text-muted-foreground">{props.payRows.length} выплат</p>
+            </div>
           </CardContent>
         </Card>
       </div>

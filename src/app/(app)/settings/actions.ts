@@ -13,6 +13,7 @@ import {
 } from "@/lib/totp";
 import { validateBotToken, sendTelegram } from "@/lib/telegram";
 import { fetchAndStoreRates } from "@/lib/fetch-rates";
+import { runNotifications } from "@/lib/notify";
 
 // ---- Profile ----
 const ProfileSchema = z.object({
@@ -191,5 +192,31 @@ export async function clearTelegram(): Promise<SettingsState> {
   });
   await audit("TELEGRAM_UPDATE", { entity: user.id });
   revalidatePath("/settings");
+  return { ok: true };
+}
+
+// ---- Telegram notify toggles: saved instantly from the configured view ----
+export async function updateNotifyFlags(flags: {
+  upcoming: boolean; paid: boolean; payroll: boolean; summary: boolean;
+}): Promise<SettingsState> {
+  const user = await requireUser();
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      telegramNotifyUpcoming: !!flags.upcoming,
+      telegramNotifyPaid: !!flags.paid,
+      telegramNotifyPayroll: !!flags.payroll,
+      telegramNotifySummary: !!flags.summary,
+    },
+  });
+  revalidatePath("/settings");
+  return { ok: true };
+}
+
+/** Manually trigger the daily notification run (same as the scheduler/cron). */
+export async function runNotificationsNow(): Promise<SettingsState> {
+  await requireUser();
+  const res = await runNotifications();
+  if (!res.sent) return { ok: false, error: "Нечего отправлять (уже отправлено сегодня или нет событий)" };
   return { ok: true };
 }

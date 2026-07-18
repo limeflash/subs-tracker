@@ -10,7 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { saveTelegram, testTelegram, clearTelegram, type SettingsState } from "../actions";
+import { saveTelegram, testTelegram, clearTelegram, updateNotifyFlags, runNotificationsNow, type SettingsState } from "../actions";
 
 interface Props {
   configured: boolean;
@@ -29,6 +29,12 @@ export function TelegramTab(props: Props) {
   const [payroll, setPayroll] = useState(props.notifyPayroll);
   const [summary, setSummary] = useState(props.notifySummary);
 
+  const saveFlags = (next: { upcoming: boolean; paid: boolean; payroll: boolean; summary: boolean }) =>
+    start(async () => {
+      await updateNotifyFlags(next);
+      toast.success("Сохранено");
+    });
+
   useEffect(() => {
     if (state?.ok) { toast.success("Telegram сохранён"); setShowForm(false); }
     else if (state?.error) toast.error(state.error);
@@ -43,16 +49,21 @@ export function TelegramTab(props: Props) {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-3 rounded-md border p-3">
-            <Toggle label="Предстоящие списания" checked={upcoming} on={setUpcoming} />
-            <Toggle label="Состоявшиеся списания" checked={paid} on={setPaid} />
-            <Toggle label="Выплаты ЗП" checked={payroll} on={setPayroll} />
-            <Toggle label="Сводка за период" checked={summary} on={setSummary} />
-            <p className="text-xs text-muted-foreground">Изменения этих переключателей сохраняются вместе с формой ниже.</p>
+            <Toggle label="Предстоящие списания" checked={upcoming} on={(v) => { setUpcoming(v); saveFlags({ upcoming: v, paid, payroll, summary }); }} />
+            <Toggle label="Состоявшиеся списания" checked={paid} on={(v) => { setPaid(v); saveFlags({ upcoming, paid: v, payroll, summary }); }} />
+            <Toggle label="Выплаты ЗП" checked={payroll} on={(v) => { setPayroll(v); saveFlags({ upcoming, paid, payroll: v, summary }); }} />
+            <Toggle label="Сводка за период" checked={summary} on={(v) => { setSummary(v); saveFlags({ upcoming, paid, payroll, summary: v }); }} />
+            <p className="text-xs text-muted-foreground">
+              Отправляются автоматически каждый день после 09:00 — внешний cron не нужен.
+            </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={() => setShowForm(true)}>Изменить токен/chat_id</Button>
             <Button variant="outline" disabled={pending} onClick={() => start(async () => { const r = await testTelegram(); r.ok ? toast.success("Тест отправлен") : toast.error(r.error ?? "Ошибка"); })}>
               <Send className="mr-2 h-4 w-4" /> Тест
+            </Button>
+            <Button variant="outline" disabled={pending} onClick={() => start(async () => { const r = await runNotificationsNow(); r.ok ? toast.success("Уведомления отправлены") : toast.error(r.error ?? "Ошибка"); })}>
+              Отправить сейчас
             </Button>
             <Button variant="ghost" disabled={pending} onClick={() => start(async () => { await clearTelegram(); toast.success("Telegram отключён"); window.location.reload(); })}>
               <Trash2 className="mr-2 h-4 w-4" /> Отключить

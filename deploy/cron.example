@@ -1,4 +1,11 @@
-# Host crontab entries for the Subs app.
+# Host crontab entries for the Subs app — OPTIONAL.
+#
+# The app ships with a built-in scheduler (src/instrumentation.ts) that sends
+# Telegram notifications daily from 09:00 and refreshes rates nightly, so no
+# crontab is required. These entries remain as a belt-and-braces option or for
+# custom send times; duplicate sends are deduplicated per day, so running both
+# is safe.
+#
 # Install: crontab -e, then paste (replace SECRET and your-domain.example).
 #
 # Daily 09:07 — notifications (upcoming/past/summary/payroll)

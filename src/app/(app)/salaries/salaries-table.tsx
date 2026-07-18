@@ -33,7 +33,7 @@ export function SalariesTable({ payments }: { payments: Row[] }) {
         <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
         <Input placeholder="Поиск…" value={q} onChange={(e) => setQ(e.target.value)} className="pl-8" />
       </div>
-      <div className="rounded-md border">
+      <div className="overflow-x-auto rounded-xl border bg-card shadow-sm">
         <Table>
           <TableHeader>
             <TableRow>

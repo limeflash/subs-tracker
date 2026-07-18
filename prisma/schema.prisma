@@ -156,3 +156,17 @@ model AuditLog {
 
   @@index([at])
 }
+
+// Dedup ledger for outbound notifications. The internal scheduler ticks every
+// 15 min; a row here guarantees each logical message (kind+refKey+day) is sent
+// at most once per day no matter how many ticks fire.
+model NotificationLog {
+  id     String   @id @default(cuid())
+  kind   String // UPCOMING | DUE_TODAY | PAID | PAYROLL | SUMMARY
+  refKey String // subscription id, notify-day, "all", ...
+  day    String // YYYY-MM-DD in server-local time
+  sentAt DateTime @default(now())
+
+  @@unique([kind, refKey, day])
+  @@index([day])
+}

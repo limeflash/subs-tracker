@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { resolveFavicon } from "@/lib/favicon";
 import { addPeriod, nextPaymentFrom, type BillingCycle } from "@/lib/periods";
+import { notifyMarkedPaid } from "@/lib/notify";
 import { requireUser } from "@/lib/session";
 
 const CycleEnum = z.enum(["MONTHLY", "QUARTERLY", "YEARLY", "CUSTOM"]);
@@ -175,8 +176,8 @@ export async function deleteSubscription(id: string): Promise<{ ok: boolean; err
 
 /** Advance the schedule after a payment has been registered / occurred. */
 export async function advanceSubscription(id: string): Promise<void> {
-  await requireUser();
-  const sub = await prisma.subscription.findUnique({ where: { id } });
+  const user = await requireUser();
+  const sub = await prisma.subscription.findUnique({ where: { id }, include: { currency: true } });
   if (!sub) return;
   const cfg = {
     cycle: sub.billingCycle as BillingCycle,
@@ -185,6 +186,14 @@ export async function advanceSubscription(id: string): Promise<void> {
   };
   const next = addPeriod(sub.nextPaymentDate, cfg);
   await prisma.subscription.update({ where: { id }, data: { nextPaymentDate: next } });
+  if (user.telegramNotifyPaid) {
+    void notifyMarkedPaid({
+      title: sub.title,
+      amount: Number(sub.amount),
+      currencyCode: sub.currency.code,
+      nextPaymentDate: next,
+    });
+  }
   revalidatePath("/subscriptions");
   revalidatePath("/dashboard");
 }

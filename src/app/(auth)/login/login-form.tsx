@@ -12,7 +12,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Lock } from "lucide-react";
 import type { LoginState } from "./actions";
 
 export function LoginForm({
@@ -30,18 +29,17 @@ export function LoginForm({
 }) {
   const [state, formAction] = useActionState(action, undefined);
   return (
-    <Card className="w-full max-w-sm">
+    <Card className="w-full max-w-sm border-border/60 shadow-xl shadow-primary/5">
       <CardHeader className="space-y-2 text-center">
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-          <Lock className="h-6 w-6 text-primary" />
-        </div>
         <CardTitle className="text-2xl">{title}</CardTitle>
         <CardDescription>{description}</CardDescription>
       </CardHeader>
       <form action={formAction}>
         <CardContent className="space-y-4">
           {state?.error && (
-            <p className="text-sm font-medium text-destructive">{state.error}</p>
+            <p className="rounded-lg bg-destructive/10 px-3 py-2 text-center text-sm font-medium text-destructive">
+              {state.error}
+            </p>
           )}
           {children}
         </CardContent>

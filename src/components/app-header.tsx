@@ -14,19 +14,23 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { signOut } from "next-auth/react";
 import { MobileNav } from "./mobile-nav";
+import { CommandMenu } from "./command-menu";
 
 export function Header({ email }: { email: string }) {
   const { setTheme, theme } = useTheme();
   const initials = email.slice(0, 2).toUpperCase();
 
   return (
-    <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur md:px-6">
+    <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b bg-background/70 px-4 backdrop-blur-xl md:px-6">
       <MobileNav />
       <div className="ml-auto flex items-center gap-2">
+        <CommandMenu />
+        <CommandMenu variant="icon" />
         <Button
           variant="ghost"
           size="icon"
           aria-label="Тема"
+          className="rounded-full"
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
         >
           <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
@@ -34,9 +38,11 @@ export function Header({ email }: { email: string }) {
         </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className="gap-2 px-2">
-              <Avatar className="h-7 w-7">
-                <AvatarFallback>{initials}</AvatarFallback>
+            <Button variant="ghost" className="gap-2 rounded-full px-2">
+              <Avatar className="h-8 w-8 ring-2 ring-primary/20">
+                <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-violet-600 text-xs font-semibold text-white">
+                  {initials}
+                </AvatarFallback>
               </Avatar>
               <span className="hidden text-sm md:inline">{email}</span>
             </Button>

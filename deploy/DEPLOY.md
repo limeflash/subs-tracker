@@ -40,8 +40,12 @@ The script:
 Under scenarios A/C/Caddy the site gets a valid TLS certificate immediately.
 
 ## 3. Cron (rates + notifications)
+**Not required since the built-in scheduler landed** — the app sends Telegram
+notifications daily from 09:00 and refreshes rates at night out of the box
+(`src/instrumentation.ts`). The HTTP endpoints below still work if you prefer
+host cron or custom send times; per-day deduplication makes overlaps harmless.
 ```bash
-crontab -e   # paste from deploy/cron.example, substituting CRON_SECRET
+crontab -e   # optionally paste from deploy/cron.example, substituting CRON_SECRET
 ```
 - `09:07` — `/api/cron/notify` (payments, payroll, Monday summary);
 - `03:13` — `/api/cron/rates` (currency rate refresh).
