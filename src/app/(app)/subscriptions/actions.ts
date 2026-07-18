@@ -8,6 +8,7 @@ import { resolveFavicon } from "@/lib/favicon";
 import { nextPaymentFrom, type BillingCycle } from "@/lib/periods";
 import { notifyMarkedPaid } from "@/lib/notify";
 import { markSubscriptionPaid } from "@/lib/subscriptions";
+import { parseSubscriptionsFromImage, resolveCurrencyId } from "@/lib/ai";
 import { requireUser } from "@/lib/session";
 
 const CycleEnum = z.enum(["MONTHLY", "QUARTERLY", "YEARLY", "CUSTOM"]);
@@ -27,6 +28,40 @@ const SubSchema = z.object({
 });
 
 export type SubFormState = { ok: boolean; error?: string; id?: string };
+
+export interface ParsedItem {
+  title: string;
+  amount: number;
+  currency: string;
+  currencyId: string | null;
+  cycle: string;
+  every: number;
+  unitDays?: number | null;
+  url?: string | null;
+  nextPaymentDate?: string | null;
+  notes?: string | null;
+}
+
+/** AI import: parse a base64 screenshot into subscription drafts. */
+export async function parseScreenshot(
+  imageBase64: string,
+): Promise<{ ok: boolean; items?: ParsedItem[]; error?: string }> {
+  await requireUser();
+  if (!imageBase64 || imageBase64.length > 10_000_000) {
+    return { ok: false, error: "Файл слишком большой (макс ~7 МБ)" };
+  }
+  try {
+    const parsed = await parseSubscriptionsFromImage(imageBase64);
+    if (parsed.length === 0) return { ok: false, error: "Подписки на изображении не найдены" };
+    const items: ParsedItem[] = [];
+    for (const p of parsed.slice(0, 10)) {
+      items.push({ ...p, currencyId: await resolveCurrencyId(p.currency) });
+    }
+    return { ok: true, items };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
 
 export async function createSubscription(
   _prev: SubFormState | undefined,

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { SubscriptionsTable } from "./subscriptions-table";
 import { SubscriptionFormDialog } from "./subscription-form";
+import { ImportDialog } from "./import-dialog";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 
@@ -19,23 +20,30 @@ export default async function SubscriptionsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Подписки</h1>
           <p className="text-sm text-muted-foreground">
             {subscriptions.length} записей
           </p>
         </div>
-        <SubscriptionFormDialog
-          groups={groups.map((g) => ({ id: g.id, name: g.name, color: g.color }))}
-          currencies={currencies.map((c) => ({ id: c.id, code: c.code, symbol: c.symbol }))}
-          defaultCurrencyId={user?.displayCurrencyId ?? currencies[0]?.id}
-          trigger={
-            <Button>
-              <Plus className="mr-2 h-4 w-4" /> Добавить
-            </Button>
-          }
-        />
+        <div className="flex items-center gap-2">
+          <ImportDialog
+            groups={groups.map((g) => ({ id: g.id, name: g.name, color: g.color }))}
+            currencies={currencies.map((c) => ({ id: c.id, code: c.code, symbol: c.symbol }))}
+            defaultCurrencyId={user?.displayCurrencyId ?? currencies[0]?.id}
+          />
+          <SubscriptionFormDialog
+            groups={groups.map((g) => ({ id: g.id, name: g.name, color: g.color }))}
+            currencies={currencies.map((c) => ({ id: c.id, code: c.code, symbol: c.symbol }))}
+            defaultCurrencyId={user?.displayCurrencyId ?? currencies[0]?.id}
+            trigger={
+              <Button>
+                <Plus className="mr-2 h-4 w-4" /> Добавить
+              </Button>
+            }
+          />
+        </div>
       </div>
       <SubscriptionsTable
         groups={groups.map((g) => ({ id: g.id, name: g.name, color: g.color }))}

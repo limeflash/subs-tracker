@@ -16,6 +16,8 @@ export interface TgMessage {
   message_id: number;
   chat: { id: number };
   text?: string;
+  caption?: string;
+  photo?: { file_id: string; file_size?: number; width: number; height: number }[];
 }
 
 export interface TgUpdate {
@@ -123,6 +125,7 @@ export async function setMyCommands(cfg: TelegramConfig): Promise<void> {
       { command: "overdue", description: "Просроченные" },
       { command: "paid", description: "Отметить оплату" },
       { command: "month", description: "Расходы за месяц" },
+      { command: "add", description: "Добавить текстом: /add Netflix 999₽ в месяц" },
       { command: "help", description: "Список команд" },
     ],
   });

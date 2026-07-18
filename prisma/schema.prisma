@@ -25,6 +25,9 @@ model User {
   telegramChatId         String?
   // AES-256-GCM encrypted bot token (null until configured via Settings).
   telegramBotTokenCipher String?
+  // AES-256-GCM encrypted Ollama Cloud API key (null until configured).
+  aiApiKeyCipher         String?
+  aiModel                String   @default("qwen3.5:122b")
   telegramNotifyUpcoming Boolean   @default(true)
   telegramNotifyPaid     Boolean   @default(true)
   telegramNotifyPayroll  Boolean   @default(true)

@@ -6,7 +6,7 @@ import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { audit } from "@/lib/audit";
 import { hashPassword, verifyPassword } from "@/lib/password";
-import { encrypt } from "@/lib/crypto";
+import { encrypt, decrypt } from "@/lib/crypto";
 import {
   generateTotpSecret, buildOtpAuthUri, verifyTotp,
   generateBackupCodes, hashBackupCode,
@@ -14,6 +14,7 @@ import {
 import { validateBotToken, sendTelegram, setMyCommands } from "@/lib/telegram";
 import { fetchAndStoreRates } from "@/lib/fetch-rates";
 import { runNotifications } from "@/lib/notify";
+import { testAiKey } from "@/lib/ai";
 
 // ---- Profile ----
 const ProfileSchema = z.object({
@@ -220,5 +221,46 @@ export async function runNotificationsNow(): Promise<SettingsState> {
   await requireUser();
   const res = await runNotifications();
   if (!res.sent) return { ok: false, error: "Нечего отправлять (уже отправлено сегодня или нет событий)" };
+  return { ok: true };
+}
+
+// ---- AI (Ollama Cloud) ----
+export async function saveAi(_prev: SettingsState | undefined, formData: FormData): Promise<SettingsState> {
+  const user = await requireUser();
+  const apiKey = String(formData.get("apiKey") ?? "").trim();
+  const model = String(formData.get("model") ?? "").trim() || "qwen3.5:122b";
+  if (apiKey.length < 5 || apiKey.length > 200) return { ok: false, error: "Неверный ключ" };
+
+  const test = await testAiKey(apiKey, model);
+  if (!test.ok) return { ok: false, error: test.error ?? "Ключ не работает" };
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { aiApiKeyCipher: encrypt(apiKey), aiModel: model },
+  });
+  await audit("AI_UPDATE", { entity: user.id });
+  revalidatePath("/settings");
+  return { ok: true };
+}
+
+export async function testAiConnection(): Promise<SettingsState> {
+  const user = await requireUser();
+  if (!user.aiApiKeyCipher) return { ok: false, error: "Ключ не сохранён" };
+  try {
+    const test = await testAiKey(decrypt(user.aiApiKeyCipher), user.aiModel);
+    return test.ok ? { ok: true } : { ok: false, error: test.error };
+  } catch {
+    return { ok: false, error: "Не удалось расшифровать ключ" };
+  }
+}
+
+export async function clearAi(): Promise<SettingsState> {
+  const user = await requireUser();
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { aiApiKeyCipher: null },
+  });
+  await audit("AI_UPDATE", { entity: user.id });
+  revalidatePath("/settings");
   return { ok: true };
 }

@@ -21,6 +21,7 @@ export type AuditAction =
   | "GROUP_DELETE"
   | "CURRENCY_UPDATE"
   | "TELEGRAM_UPDATE"
+  | "AI_UPDATE"
   | "PROFILE_UPDATE";
 
 /** Append an audit entry. Errors are swallowed — audit must never break the request. */

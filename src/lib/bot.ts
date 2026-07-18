@@ -10,7 +10,8 @@ import {
   type TgUpdate,
   type InlineButton,
 } from "@/lib/telegram";
-import { markSubscriptionPaid } from "@/lib/subscriptions";
+import { markSubscriptionPaid, createFromParsed } from "@/lib/subscriptions";
+import { getAiConfig, parseSubscriptionsFromImage, parseSubscriptionsFromText, type ParsedSub } from "@/lib/ai";
 import { convertAmount, monthlyEquivalent } from "@/lib/exchange";
 import { monthRange } from "@/lib/stats";
 import { formatMoney, formatDate } from "@/lib/utils";
@@ -24,6 +25,15 @@ import { formatMoney, formatDate } from "@/lib/utils";
 const DAY_MS = 86_400_000;
 
 type Ctx = "u" | "d" | "o" | "p"; // upcoming | due-today | overdue | paid-cmd
+
+interface PendingAi {
+  items: ParsedSub[];
+  added: Set<number>;
+  at: number;
+}
+// AI import drafts awaiting the owner's "Добавить" tap. In-memory is fine:
+// single-process app, worst case a restart means re-sending the screenshot.
+const pendingAi = new Map<string, PendingAi>();
 
 let pollingStarted = false;
 let commandsRegistered = false;
@@ -75,35 +85,47 @@ async function pollLoop(): Promise<void> {
 
 async function handleUpdate(u: TgUpdate, cfg: TelegramConfig): Promise<void> {
   const msg = u.message;
-  if (msg?.text && msg.chat.id.toString() === cfg.chatId) {
-    const cmd = msg.text.trim().split(/\s+/)[0].split("@")[0].toLowerCase();
-    switch (cmd) {
-      case "/start":
-      case "/help":
-        return sendHelp(cfg);
-      case "/upcoming":
-        return sendList(cfg, "u");
-      case "/today":
-        return sendList(cfg, "d");
-      case "/overdue":
-        return sendList(cfg, "o");
-      case "/paid":
-        return sendList(cfg, "p");
-      case "/month":
-        return sendMonth(cfg);
-      default:
-        return send(cfg, "Не знаю такую команду. /help — список команд.");
+  if (msg && msg.chat.id.toString() === cfg.chatId) {
+    if (msg.photo && msg.photo.length > 0) return handlePhoto(cfg, msg.photo, msg.caption);
+    if (msg.text) {
+      const text = msg.text.trim();
+      const cmd = text.split(/\s+/)[0].split("@")[0].toLowerCase();
+      if (cmd === "/add") {
+        const payload = text.slice(text.indexOf(" ") + 1);
+        if (!payload || payload === text) return send(cfg, "Пример: <code>/add Netflix 999₽ в месяц</code>");
+        return handleAiText(cfg, payload);
+      }
+      switch (cmd) {
+        case "/start":
+        case "/help":
+          return sendHelp(cfg);
+        case "/upcoming":
+          return sendList(cfg, "u");
+        case "/today":
+          return sendList(cfg, "d");
+        case "/overdue":
+          return sendList(cfg, "o");
+        case "/paid":
+          return sendList(cfg, "p");
+        case "/month":
+          return sendMonth(cfg);
+        default:
+          return send(cfg, "Не знаю такую команду. /help — список команд.");
+      }
     }
   }
 
   const cq = u.callback_query;
   if (cq?.data && cq.message && cq.message.chat.id.toString() === cfg.chatId) {
-    const [kind, a, b] = cq.data.split(":");
+    const [kind, a, b, c] = cq.data.split(":");
     if (kind === "cmd") {
       await answerCallback(cfg, cq.id);
       if (a === "u" || a === "d" || a === "o" || a === "p") return sendList(cfg, a);
       if (a === "m") return sendMonth(cfg);
       return sendHelp(cfg);
+    }
+    if (kind === "ai") {
+      return handleAiCallback(cfg, cq.id, cq.message.chat.id, cq.message.message_id, a, b, c);
     }
     if (kind === "paid" && a && b) {
       const ctx = a as Ctx;
@@ -126,6 +148,142 @@ async function handleUpdate(u: TgUpdate, cfg: TelegramConfig): Promise<void> {
   }
 }
 
+// ---------- AI import (screenshots + /add text) ----------
+
+async function handlePhoto(
+  cfg: TelegramConfig,
+  photos: { file_id: string; file_size?: number }[],
+  caption?: string,
+): Promise<void> {
+  if (!(await getAiConfig())) {
+    return send(cfg, "🤖 AI-импорт не настроен. Добавьте ключ Ollama Cloud в Настройки → AI.");
+  }
+  await send(cfg, "🔍 Распознаю скриншот…");
+  try {
+    const largest = photos[photos.length - 1];
+    const file = await tgCall<{ file_path?: string }>(cfg, "getFile", { file_id: largest.file_id });
+    if (!file?.file_path) return send(cfg, "Не удалось скачать изображение.");
+    const res = await fetch(`https://api.telegram.org/file/bot${cfg.botToken}/${file.file_path}`, {
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) return send(cfg, "Не удалось скачать изображение.");
+    const base64 = Buffer.from(await res.arrayBuffer()).toString("base64");
+    const items = await parseSubscriptionsFromImage(base64);
+    return presentAiDrafts(cfg, items, caption);
+  } catch (e) {
+    return send(cfg, `Ошибка распознавания: ${esc((e as Error).message.slice(0, 200))}`);
+  }
+}
+
+async function handleAiText(cfg: TelegramConfig, text: string): Promise<void> {
+  if (!(await getAiConfig())) {
+    return send(cfg, "🤖 AI-импорт не настроен. Добавьте ключ Ollama Cloud в Настройки → AI.");
+  }
+  try {
+    const items = await parseSubscriptionsFromText(text);
+    return presentAiDrafts(cfg, items, text);
+  } catch (e) {
+    return send(cfg, `Ошибка: ${esc((e as Error).message.slice(0, 200))}`);
+  }
+}
+
+function newPending(items: ParsedSub[]): string {
+  // sweep stale drafts (>30 min)
+  for (const [k, v] of pendingAi) {
+    if (Date.now() - v.at > 30 * 60_000) pendingAi.delete(k);
+  }
+  const id = Math.random().toString(36).slice(2, 10);
+  pendingAi.set(id, { items, added: new Set(), at: Date.now() });
+  return id;
+}
+
+function renderDrafts(pid: string, p: PendingAi): { text: string; keyboard: InlineButton[][] } {
+  const lines = p.items.map((it, i) => {
+    const done = p.added.has(i) ? " ✅" : "";
+    return `• <b>${esc(it.title)}</b> — ${formatMoney(it.amount, it.currency)} · ${cycleLabel(it)}${done}`;
+  });
+  const keyboard: InlineButton[][] = [];
+  p.items.forEach((it, i) => {
+    if (!p.added.has(i)) keyboard.push([{ text: `➕ ${it.title}`, callback_data: `ai:a:${pid}:${i}` }]);
+  });
+  keyboard.push([{ text: "❌ Отмена", callback_data: `ai:s:${pid}:0` }]);
+  return { text: lines.join("\n"), keyboard };
+}
+
+async function presentAiDrafts(cfg: TelegramConfig, items: ParsedSub[], source?: string): Promise<void> {
+  if (items.length === 0) {
+    return send(cfg, "Подписок не нашёл. Попробуйте скриншот почище или формат: <code>/add Netflix 999₽ в месяц</code>");
+  }
+  const id = newPending(items);
+  const p = pendingAi.get(id)!;
+  const r = renderDrafts(id, p);
+  await send(
+    cfg,
+    `🤖 <b>Нашёл ${items.length === 1 ? "подписку" : `подписки (${items.length})`}:</b>\n\n${r.text}\n\nНажмите ➕, чтобы добавить.`,
+    r.keyboard,
+  );
+}
+
+async function handleAiCallback(
+  cfg: TelegramConfig,
+  cqId: string,
+  chatId: number,
+  messageId: number,
+  action: string,
+  pid: string,
+  idxRaw: string,
+): Promise<void> {
+  const p = pendingAi.get(pid);
+  if (!p) {
+    await answerCallback(cfg, cqId, "Черновик устарел — отправьте скриншот ещё раз");
+    return;
+  }
+  if (action === "s") {
+    pendingAi.delete(pid);
+    await answerCallback(cfg, cqId, "Отменено");
+    await editMessage(cfg, chatId, messageId, "Импорт отменён.");
+    return;
+  }
+  const idx = parseInt(idxRaw, 10);
+  const item = p.items[idx];
+  if (!item || p.added.has(idx)) {
+    await answerCallback(cfg, cqId, "Уже добавлено");
+    return;
+  }
+  const res = await createFromParsed(item);
+  if ("error" in res) {
+    await answerCallback(cfg, cqId, res.error);
+    return;
+  }
+  p.added.add(idx);
+  await answerCallback(cfg, cqId, `✅ ${res.title} добавлена`);
+  await sendTelegramDirect(
+    cfg,
+    `🎉 <b>${esc(res.title)}</b> добавлена — ${formatMoney(res.amount, res.currencyCode)}, следующее списание ${formatDate(res.nextPaymentDate)}.`,
+  );
+  const allDone = p.added.size >= p.items.length;
+  const r = renderDrafts(pid, p);
+  await editMessage(
+    cfg,
+    chatId,
+    messageId,
+    `🤖 <b>Импорт:</b>\n\n${r.text}${allDone ? "\n\nВсе добавлены 🎉" : ""}`,
+    allDone ? undefined : r.keyboard,
+  );
+}
+
+function cycleLabel(it: ParsedSub): string {
+  const base =
+    it.cycle === "MONTHLY"
+      ? "в месяц"
+      : it.cycle === "QUARTERLY"
+        ? "в квартал"
+        : it.cycle === "YEARLY"
+          ? "в год"
+          : `раз в ${it.unitDays ?? 30} дн.`;
+  return it.every > 1 ? `${base} ×${it.every}` : base;
+}
+
 // ---------- commands ----------
 
 async function sendHelp(cfg: TelegramConfig): Promise<void> {
@@ -136,7 +294,9 @@ async function sendHelp(cfg: TelegramConfig): Promise<void> {
       `/today — списания сегодня\n` +
       `/overdue — просроченные\n` +
       `/paid — отметить оплату\n` +
-      `/month — расходы за месяц\n\n` +
+      `/month — расходы за месяц\n` +
+      `/add — добавить текстом: <code>/add Netflix 999₽ в месяц</code>\n\n` +
+      `📷 Пришлите скриншот страницы оплаты — AI сам всё распознает.\n` +
       `Кнопка <b>✅</b> рядом со списанием отмечает его оплаченным и сдвигает дату.`,
     [
       [

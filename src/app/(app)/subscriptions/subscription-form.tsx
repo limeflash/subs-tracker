@@ -29,7 +29,10 @@ interface Props {
   groups: { id: string; name: string; color: string }[];
   currencies: { id: string; code: string; symbol: string }[];
   defaultCurrencyId?: string;
-  trigger: React.ReactNode;
+  trigger?: React.ReactNode;
+  /** Controlled mode (used by the AI import flow). */
+  open?: boolean;
+  onOpenChange?: (v: boolean) => void;
   editing?: {
     id: string;
     title: string;
@@ -44,13 +47,28 @@ interface Props {
     notes?: string | null;
     groupIds: string[];
   };
+  /** AI-parsed draft used to prefill the create form. */
+  prefill?: {
+    title?: string;
+    url?: string | null;
+    amount?: number;
+    currencyId?: string | null;
+    billingCycle?: string;
+    billingEvery?: number;
+    billingUnitDays?: number | null;
+    startDate?: string;
+    notes?: string | null;
+  };
 }
 
 export function SubscriptionFormDialog(props: Props) {
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = props.open ?? internalOpen;
+  const setOpen = props.onOpenChange ?? setInternalOpen;
+  const d = props.editing ?? props.prefill;
   const [favicon, setFavicon] = useState<string | null>(null);
-  const [url, setUrl] = useState(props.editing?.url ?? "");
-  const [cycle, setCycle] = useState<string>(props.editing?.billingCycle ?? "MONTHLY");
+  const [url, setUrl] = useState(d?.url ?? "");
+  const [cycle, setCycle] = useState<string>(d?.billingCycle ?? "MONTHLY");
   const [groupIds, setGroupIds] = useState<string[]>(props.editing?.groupIds ?? []);
 
   // live favicon preview when URL changes
@@ -88,7 +106,7 @@ export function SubscriptionFormDialog(props: Props) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>{props.trigger}</DialogTrigger>
+      {props.trigger && <DialogTrigger asChild>{props.trigger}</DialogTrigger>}
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{props.editing ? "Редактировать подписку" : "Новая подписка"}</DialogTitle>
@@ -99,7 +117,7 @@ export function SubscriptionFormDialog(props: Props) {
         <form action={formAction} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="title">Название</Label>
-            <Input id="title" name="title" required defaultValue={props.editing?.title} />
+            <Input id="title" name="title" required defaultValue={d?.title} />
           </div>
           <div className="space-y-2">
             <Label htmlFor="url">Сайт (URL)</Label>
@@ -114,18 +132,18 @@ export function SubscriptionFormDialog(props: Props) {
                 placeholder="example.com"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
-                defaultValue={props.editing?.url ?? ""}
+                defaultValue={d?.url ?? ""}
               />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="amount">Сумма</Label>
-              <Input id="amount" name="amount" type="number" step="0.01" required defaultValue={props.editing?.amount} />
+              <Input id="amount" name="amount" type="number" step="0.01" required defaultValue={d?.amount} />
             </div>
             <div className="space-y-2">
               <Label>Валюта</Label>
-              <Select name="currencyId" defaultValue={props.editing?.currencyId ?? props.defaultCurrencyId}>
+              <Select name="currencyId" defaultValue={d?.currencyId ?? props.defaultCurrencyId}>
                 <SelectTrigger><SelectValue placeholder="Валюта" /></SelectTrigger>
                 <SelectContent>
                   {props.currencies.map((c) => (
@@ -138,7 +156,7 @@ export function SubscriptionFormDialog(props: Props) {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Период оплаты</Label>
-              <Select name="billingCycle" value={cycle} onValueChange={setCycle} defaultValue={props.editing?.billingCycle ?? "MONTHLY"}>
+              <Select name="billingCycle" value={cycle} onValueChange={setCycle} defaultValue={d?.billingCycle ?? "MONTHLY"}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="MONTHLY">Ежемесячно</SelectItem>
@@ -150,19 +168,19 @@ export function SubscriptionFormDialog(props: Props) {
             </div>
             <div className="space-y-2">
               <Label htmlFor="billingEvery">Каждые N</Label>
-              <Input id="billingEvery" name="billingEvery" type="number" min={1} required defaultValue={props.editing?.billingEvery ?? 1} />
+              <Input id="billingEvery" name="billingEvery" type="number" min={1} required defaultValue={d?.billingEvery ?? 1} />
             </div>
           </div>
           {cycle === "CUSTOM" && (
             <div className="space-y-2">
               <Label htmlFor="billingUnitDays">Дней в цикле</Label>
-              <Input id="billingUnitDays" name="billingUnitDays" type="number" min={1} defaultValue={props.editing?.billingUnitDays ?? 30} />
+              <Input id="billingUnitDays" name="billingUnitDays" type="number" min={1} defaultValue={d?.billingUnitDays ?? 30} />
             </div>
           )}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="startDate">Дата начала</Label>
-              <Input id="startDate" name="startDate" type="date" required defaultValue={props.editing?.startDate?.slice(0, 10)} />
+              <Input id="startDate" name="startDate" type="date" required defaultValue={d?.startDate?.slice(0, 10)} />
             </div>
             <div className="space-y-2">
               <Label htmlFor="endDate">Дата окончания</Label>
@@ -171,7 +189,7 @@ export function SubscriptionFormDialog(props: Props) {
           </div>
           <div className="space-y-2">
             <Label htmlFor="notes">Заметки</Label>
-            <Input id="notes" name="notes" defaultValue={props.editing?.notes ?? ""} />
+            <Input id="notes" name="notes" defaultValue={d?.notes ?? ""} />
           </div>
           {props.groups.length > 0 && (
             <div className="space-y-2">

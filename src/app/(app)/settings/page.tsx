@@ -7,6 +7,7 @@ import { ProfileTab } from "./tabs/profile-tab";
 import { SecurityTab } from "./tabs/security-tab";
 import { CurrenciesTab } from "./tabs/currencies-tab";
 import { TelegramTab } from "./tabs/telegram-tab";
+import { AiTab } from "./tabs/ai-tab";
 
 export default async function SettingsPage() {
   const user = await requireUser();
@@ -33,6 +34,7 @@ export default async function SettingsPage() {
           <TabsTrigger value="security">Безопасность</TabsTrigger>
           <TabsTrigger value="currencies">Валюты</TabsTrigger>
           <TabsTrigger value="telegram">Telegram</TabsTrigger>
+          <TabsTrigger value="ai">AI</TabsTrigger>
         </TabsList>
         <TabsContent value="profile" className="mt-4">
           <ProfileTab
@@ -70,6 +72,9 @@ export default async function SettingsPage() {
             notifySummary={user.telegramNotifySummary}
             notifyDays={user.telegramNotifyDays}
           />
+        </TabsContent>
+        <TabsContent value="ai" className="mt-4">
+          <AiTab configured={!!user.aiApiKeyCipher} model={user.aiModel} />
         </TabsContent>
       </Tabs>
     </div>
