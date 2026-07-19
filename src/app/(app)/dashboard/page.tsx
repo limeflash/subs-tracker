@@ -11,6 +11,7 @@ import Link from "next/link";
 import { ArrowRight, CalendarClock, CreditCard, Users, Wallet, TrendingUp, PieChart as PieIcon } from "lucide-react";
 import { ForecastChart, GroupDonut, type ForecastPoint, type GroupSlice } from "./dashboard-charts";
 import { OverdueList, type OverdueRow } from "./overdue-list";
+import { ClickMoney } from "@/components/click-money";
 
 const DAY_MS = 86_400_000;
 
@@ -61,6 +62,10 @@ export default async function DashboardPage() {
   const fmtTotal = (t: number | null) => (t == null ? "?" : formatMoney(t, displayCode));
 
   // ---- overdue ----
+  const overdueConv = await Promise.all(
+    allActive.map((s) => convertAmount(Number(s.amount), s.currency.code, displayCode)),
+  );
+  const convBySub = new Map(allActive.map((s, i) => [s.id, overdueConv[i]]));
   const overdue: OverdueRow[] = allActive
     .filter((s) => s.nextPaymentDate.getTime() <= now.getTime())
     .map((s) => ({
@@ -69,6 +74,8 @@ export default async function DashboardPage() {
       faviconUrl: s.faviconUrl,
       amount: Number(s.amount),
       currencyCode: s.currency.code,
+      convertedAmount: convBySub.get(s.id) ?? null,
+      displayCode,
       nextPaymentDate: s.nextPaymentDate.toISOString(),
       overdueDays: Math.max(0, Math.floor((startOfToday.getTime() - s.nextPaymentDate.getTime()) / DAY_MS)),
     }));
@@ -83,6 +90,8 @@ export default async function DashboardPage() {
       faviconUrl: s.faviconUrl,
       amount: Number(s.amount),
       currencyCode: s.currency.code,
+      convertedAmount: convBySub.get(s.id) ?? null,
+      displayCode,
       nextPaymentDate: s.nextPaymentDate,
       daysLeft: Math.ceil((s.nextPaymentDate.getTime() - startOfToday.getTime()) / DAY_MS),
     }));
@@ -221,7 +230,12 @@ export default async function DashboardPage() {
                 <span className="truncate font-medium">{s.title}</span>
               </div>
               <div className="flex shrink-0 items-center gap-3 text-sm">
-                <span className="font-semibold tabular-nums">{formatMoney(s.amount, s.currencyCode)}</span>
+                <span className="font-semibold">
+                  <ClickMoney
+                    converted={s.convertedAmount != null ? formatMoney(s.convertedAmount, s.displayCode) : null}
+                    native={formatMoney(s.amount, s.currencyCode)}
+                  />
+                </span>
                 <Badge
                   variant={s.daysLeft <= 1 ? "default" : "secondary"}
                   className="w-24 justify-center tabular-nums"

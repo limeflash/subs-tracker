@@ -1,7 +1,20 @@
 import { prisma } from "@/lib/db";
 import { sendTelegram } from "@/lib/telegram";
 import { nextPaymentFrom, type BillingCycle } from "@/lib/periods";
+import { convertAmount } from "@/lib/exchange";
 import { formatMoney, formatDate } from "@/lib/utils";
+
+type MoneyRow = { amount: unknown; currency: { code: string } };
+
+/** Format amounts in the owner's display currency; fall back to native when a rate is missing. */
+async function displayLine<T extends MoneyRow>(rows: T[], displayCode: string, render: (row: T, money: string) => string): Promise<string[]> {
+  const conv = await Promise.all(rows.map((r) => convertAmount(Number(r.amount), r.currency.code, displayCode)));
+  return rows.map((r, i) => {
+    const v = conv[i];
+    const money = v != null ? formatMoney(v, displayCode) : formatMoney(Number(r.amount), r.currency.code);
+    return render(r, money);
+  });
+}
 
 /**
  * Daily notification run. Idempotent per (kind, refKey, day) via the
@@ -13,11 +26,13 @@ export async function runNotifications(now = new Date()): Promise<{
 }> {
   const user = await prisma.user.findFirst({
     where: { telegramBotTokenCipher: { not: null }, telegramChatId: { not: null } },
+    include: { displayCurrency: true },
     orderBy: { createdAt: "asc" },
   });
   if (!user?.telegramBotTokenCipher || !user.telegramChatId) {
     return { upcoming: 0, dueToday: 0, past: 0, summary: false, sent: false };
   }
+  const displayCode = user.displayCurrency?.code ?? "USD";
 
   const day = localDay(now);
   const startOfToday = new Date(now);
@@ -47,9 +62,7 @@ export async function runNotifications(now = new Date()): Promise<{
       if (subs.length === 0) continue;
       const refKey = d === 0 ? "due-today" : `in-${d}d`;
       if (!(await claim("UPCOMING", refKey, day))) continue;
-      const lines = subs.map(
-        (s) => `• <b>${escapeHtml(s.title)}</b> — ${formatMoney(Number(s.amount), s.currency.code)}`,
-      );
+      const lines = await displayLine(subs, displayCode, (s, money) => `• <b>${escapeHtml(s.title)}</b> — ${money}`);
       const header =
         d === 0
           ? "💸 Списания <b>сегодня</b>:"
@@ -83,9 +96,7 @@ export async function runNotifications(now = new Date()): Promise<{
       if (await claim("PAID", `${s.id}:${s.nextPaymentDate.toISOString()}`, day)) fresh.push(s);
     }
     if (fresh.length > 0) {
-      const lines = fresh.map(
-        (s) => `• <b>${escapeHtml(s.title)}</b> — ${formatMoney(Number(s.amount), s.currency.code)}`,
-      );
+      const lines = await displayLine(fresh, displayCode, (s, money) => `• <b>${escapeHtml(s.title)}</b> — ${money}`);
       const ok = await sendTelegram(`✅ Списания состоялись:\n${lines.join("\n")}`);
       if (ok) {
         sent = true;
@@ -113,9 +124,7 @@ export async function runNotifications(now = new Date()): Promise<{
       include: { currency: true, employee: true },
     });
     if (todayPayments.length > 0 && (await claim("PAYROLL", "all", day))) {
-      const lines = todayPayments.map(
-        (p) => `• <b>${escapeHtml(p.employee.name)}</b> — ${formatMoney(Number(p.amount), p.currency.code)} (${escapeHtml(p.periodLabel)})`,
-      );
+      const lines = await displayLine(todayPayments, displayCode, (p, money) => `• <b>${escapeHtml(p.employee.name)}</b> — ${money} (${escapeHtml(p.periodLabel)})`);
       const ok = await sendTelegram(`💳 Выплаты ЗП сегодня:\n${lines.join("\n")}`);
       if (ok) sent = true;
       else await release("PAYROLL", "all", day);
@@ -134,9 +143,7 @@ export async function runNotifications(now = new Date()): Promise<{
       prisma.subscription.findMany({ where: { active: true, nextPaymentDate: { gte: now, lt: ahead } }, include: { currency: true } }),
       prisma.salaryPayment.findMany({ where: { paidAt: { gte: since, lt: now } }, include: { currency: true } }),
     ]);
-    const nextLines = nextSubs.slice(0, 10).map(
-      (s) => `• <b>${escapeHtml(s.title)}</b> — ${formatMoney(Number(s.amount), s.currency.code)} · ${formatDate(s.nextPaymentDate)}`,
-    );
+    const nextLines = await displayLine(nextSubs.slice(0, 10), displayCode, (s, money) => `• <b>${escapeHtml(s.title)}</b> — ${money} · ${formatDate(s.nextPaymentDate)}`);
     const txt =
       `📊 <b>Сводка за неделю</b>\n` +
       `Списаний за неделю: ${pastSubs.length}\n` +
@@ -155,8 +162,12 @@ export async function runNotifications(now = new Date()): Promise<{
 export async function notifyMarkedPaid(sub: {
   title: string; amount: number; currencyCode: string; nextPaymentDate: Date;
 }): Promise<void> {
+  const user = await prisma.user.findFirst({ include: { displayCurrency: true }, orderBy: { createdAt: "asc" } });
+  const displayCode = user?.displayCurrency?.code ?? "USD";
+  const v = await convertAmount(sub.amount, sub.currencyCode, displayCode);
+  const money = v != null ? formatMoney(v, displayCode) : formatMoney(sub.amount, sub.currencyCode);
   await sendTelegram(
-    `☑️ <b>${escapeHtml(sub.title)}</b> отмечена оплаченной — ${formatMoney(sub.amount, sub.currencyCode)}.\n` +
+    `☑️ <b>${escapeHtml(sub.title)}</b> отмечена оплаченной — ${money}.\n` +
     `Следующее списание: ${formatDate(sub.nextPaymentDate)}`,
   ).catch(() => false);
 }

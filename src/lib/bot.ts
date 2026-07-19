@@ -137,9 +137,12 @@ async function handleUpdate(u: TgUpdate, cfg: TelegramConfig): Promise<void> {
         return;
       }
       await answerCallback(cfg, cq.id, `✅ ${res.title} — оплачено`);
+      const u0 = await prisma.user.findFirst({ include: { displayCurrency: true }, orderBy: { createdAt: "asc" } });
+      const dc = u0?.displayCurrency?.code ?? "USD";
+      const cv = await convertAmount(res.amount, res.currencyCode, dc);
       await sendTelegramDirect(
         cfg,
-        `☑️ <b>${esc(res.title)}</b> оплачена — ${formatMoney(res.amount, res.currencyCode)}.\n` +
+        `☑️ <b>${esc(res.title)}</b> оплачена — ${cv != null ? formatMoney(cv, dc) : formatMoney(res.amount, res.currencyCode)}.\n` +
           `Следующее списание: ${formatDate(res.nextPaymentDate)}`,
       );
       // refresh the list the button came from
@@ -388,19 +391,29 @@ async function buildList(kind: ListKind): Promise<{ text: string; keyboard?: Inl
       break;
   }
 
-  const subs = await prisma.subscription.findMany({
-    where,
-    include: { currency: true },
-    orderBy: { nextPaymentDate: "asc" },
-    take: 10,
-  });
+  const [subs, user] = await Promise.all([
+    prisma.subscription.findMany({
+      where,
+      include: { currency: true },
+      orderBy: { nextPaymentDate: "asc" },
+      take: 10,
+    }),
+    prisma.user.findFirst({ include: { displayCurrency: true }, orderBy: { createdAt: "asc" } }),
+  ]);
   if (subs.length === 0) return { text: empty };
 
-  const lines = subs.map((s) => {
+  const displayCode = user?.displayCurrency?.code ?? "USD";
+  const converted = await Promise.all(
+    subs.map((s) => convertAmount(Number(s.amount), s.currency.code, displayCode)),
+  );
+
+  const lines = subs.map((s, i) => {
     const days = Math.ceil((s.nextPaymentDate.getTime() - startOfToday.getTime()) / DAY_MS);
     const when =
       kind === "u" ? ` · ${daysLabel(days)}` : kind === "d" ? "" : ` · просрочено ${-days} ${plural(-days)}`;
-    return `• <b>${esc(s.title)}</b> — ${formatMoney(Number(s.amount), s.currency.code)}${when}`;
+    const v = converted[i];
+    const money = v != null ? formatMoney(v, displayCode) : formatMoney(Number(s.amount), s.currency.code);
+    return `• <b>${esc(s.title)}</b> — ${money}${when}`;
   });
 
   const keyboard = withButtons

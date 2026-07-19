@@ -14,7 +14,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Trash2, Search, Pencil, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
-import { formatDate } from "@/lib/utils";
+import { formatDate, formatMoney } from "@/lib/utils";
+import { ClickMoney } from "@/components/click-money";
 import { deleteSubscription, advanceSubscription } from "./actions";
 import { SubscriptionFormDialog } from "./subscription-form";
 
@@ -34,6 +35,8 @@ interface Row {
   url?: string | null;
   faviconUrl?: string | null;
   amount: number;
+  convertedAmount?: number | null;
+  displayCode?: string;
   currencyId: string;
   currencyCode: string;
   currencySymbol: string;
@@ -109,8 +112,11 @@ export function SubscriptionsTable({
                     </p>
                   </div>
                 </div>
-                <p className="shrink-0 font-semibold tabular-nums">
-                  {s.amount.toLocaleString("ru-RU")} {s.currencySymbol}
+                <p className="shrink-0 font-semibold">
+                  <ClickMoney
+                    converted={s.convertedAmount != null ? formatMoney(s.convertedAmount, s.displayCode ?? "USD") : null}
+                    native={`${s.amount.toLocaleString("ru-RU")} ${s.currencySymbol}`}
+                  />
                 </p>
               </div>
               {s.groups.length > 0 && (
@@ -233,8 +239,11 @@ export function SubscriptionsTable({
                     ))}
                   </div>
                 </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {s.amount.toLocaleString("ru-RU")} {s.currencySymbol}
+                <TableCell className="text-right">
+                  <ClickMoney
+                    converted={s.convertedAmount != null ? formatMoney(s.convertedAmount, s.displayCode ?? "USD") : null}
+                    native={`${s.amount.toLocaleString("ru-RU")} ${s.currencySymbol}`}
+                  />
                 </TableCell>
                 <TableCell className="text-sm">
                   {CYCLE_LABEL[s.billingCycle] ?? s.billingCycle}

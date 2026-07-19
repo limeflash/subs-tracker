@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/session";
 import { SubscriptionsTable } from "./subscriptions-table";
 import { SubscriptionFormDialog } from "./subscription-form";
 import { ImportDialog } from "./import-dialog";
+import { convertAmount } from "@/lib/exchange";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 
@@ -17,6 +18,10 @@ export default async function SubscriptionsPage() {
     prisma.group.findMany({ orderBy: { name: "asc" } }),
     prisma.currency.findMany({ orderBy: { code: "asc" } }),
   ]);
+  const displayCode = user.displayCurrency?.code ?? "USD";
+  const converted = await Promise.all(
+    subscriptions.map((s) => convertAmount(Number(s.amount), s.currency.code, displayCode)),
+  );
 
   return (
     <div className="space-y-6">
@@ -48,12 +53,14 @@ export default async function SubscriptionsPage() {
       <SubscriptionsTable
         groups={groups.map((g) => ({ id: g.id, name: g.name, color: g.color }))}
         currencies={currencies.map((c) => ({ id: c.id, code: c.code, symbol: c.symbol }))}
-        subscriptions={subscriptions.map((s) => ({
+        subscriptions={subscriptions.map((s, i) => ({
           id: s.id,
           title: s.title,
           url: s.url,
           faviconUrl: s.faviconUrl,
           amount: Number(s.amount),
+          convertedAmount: converted[i],
+          displayCode,
           currencyId: s.currencyId,
           currencyCode: s.currency.code,
           currencySymbol: s.currency.symbol,

@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Check, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatMoney, formatDate } from "@/lib/utils";
+import { ClickMoney } from "@/components/click-money";
 import { advanceSubscription } from "../subscriptions/actions";
 
 export interface OverdueRow {
@@ -13,6 +14,8 @@ export interface OverdueRow {
   faviconUrl?: string | null;
   amount: number;
   currencyCode: string;
+  convertedAmount?: number | null;
+  displayCode?: string;
   nextPaymentDate: string;
   overdueDays: number;
 }
@@ -44,8 +47,11 @@ export function OverdueList({ rows }: { rows: OverdueRow[] }) {
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-3">
-                <span className="text-sm font-semibold tabular-nums">
-                  {formatMoney(r.amount, r.currencyCode)}
+                <span className="text-sm font-semibold">
+                  <ClickMoney
+                    converted={r.convertedAmount != null ? formatMoney(r.convertedAmount, r.displayCode ?? "USD") : null}
+                    native={formatMoney(r.amount, r.currencyCode)}
+                  />
                 </span>
                 <Button
                   size="sm"
