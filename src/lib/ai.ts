@@ -64,8 +64,9 @@ const PROMPT = `Ты — парсер подписок. Из входных да
 
 Правила:
 - "каждый месяц/ежемесячно/monthly" → MONTHLY, every=1; "раз в год/yearly/annually" → YEARLY; "каждые 3 месяца" → QUARTERLY или MONTHLY с every=3; "раз в N дней" → CUSTOM с unitDays=N.
-- Если дата следующего платежа не видна — null.
-- Если на скриншоте несколько подписок/тарифов — верни все.
+- Если пользователь дал пояснение к скриншоту (подпись/текст) — это важный контекст: используй его, чтобы понять, какая подписка нужна и как её назвать, и сохрани пояснение в "notes".
+- Если дата следующего платежа не видна — null. Если видна дата следующего продления/renewal — используй её.
+- Если на скриншоте несколько подписок/тарифов, но пользователь в пояснении указал одну — верни только её.
 - Только JSON, без пояснений. Если подписок нет — верни [].`;
 
 async function chat(cfg: AiConfig, content: string, images?: string[]): Promise<string> {
@@ -152,10 +153,16 @@ function extractJsonArray(text: string): unknown[] {
   return [];
 }
 
-export async function parseSubscriptionsFromImage(imageBase64: string): Promise<ParsedSub[]> {
+export async function parseSubscriptionsFromImage(imageBase64: string, caption?: string): Promise<ParsedSub[]> {
   const cfg = await getAiConfig();
   if (!cfg) throw new Error("AI не настроен — добавьте ключ Ollama Cloud в Настройках");
-  const content = await chat(cfg, "Извлеки подписки со скриншота.", [imageBase64]);
+  const content = await chat(
+    cfg,
+    caption?.trim()
+      ? `Извлеки подписки со скриншота. Пояснение пользователя: «${caption.trim().slice(0, 500)}»`
+      : "Извлеки подписки со скриншота.",
+    [imageBase64],
+  );
   return sanitize(extractJsonArray(content));
 }
 

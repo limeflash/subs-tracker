@@ -172,7 +172,7 @@ async function handlePhoto(
     });
     if (!res.ok) return send(cfg, "Не удалось скачать изображение.");
     const base64 = Buffer.from(await res.arrayBuffer()).toString("base64");
-    const items = await parseSubscriptionsFromImage(base64);
+    const items = await parseSubscriptionsFromImage(base64, caption);
     return presentAiDrafts(cfg, items, caption);
   } catch (e) {
     return send(cfg, `Ошибка распознавания: ${esc((e as Error).message.slice(0, 200))}`);
