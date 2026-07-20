@@ -162,7 +162,7 @@ async function handlePhoto(
   if (!(await getAiConfig())) {
     return send(cfg, "🤖 AI-импорт не настроен. Добавьте ключ Ollama Cloud в Настройки → AI.");
   }
-  await send(cfg, "🔍 Распознаю скриншот…");
+  await send(cfg, "🔍 Распознаю скриншот… (может занять пару минут — облако медленное)");
   try {
     const largest = photos[photos.length - 1];
     const file = await tgCall<{ file_path?: string }>(cfg, "getFile", { file_id: largest.file_id });

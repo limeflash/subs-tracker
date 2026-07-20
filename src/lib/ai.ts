@@ -121,7 +121,7 @@ function contextBlock(ctx?: AiContext): string {
   return `\n\nТекущие подписки пользователя:\n${subs}\n\nГруппы пользователя: ${groups}`;
 }
 
-async function chat(cfg: AiConfig, content: string, images?: string[]): Promise<string> {
+async function chatOnce(cfg: AiConfig, content: string, images: string[] | undefined, timeoutMs: number): Promise<string> {
   const res = await fetch(`${HOST}/api/chat`, {
     method: "POST",
     headers: {
@@ -138,7 +138,7 @@ async function chat(cfg: AiConfig, content: string, images?: string[]): Promise<
       ],
       options: { temperature: 0 },
     }),
-    signal: AbortSignal.timeout(90_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -146,6 +146,18 @@ async function chat(cfg: AiConfig, content: string, images?: string[]): Promise<
   }
   const json = await res.json();
   return String(json?.message?.content ?? "");
+}
+
+async function chat(cfg: AiConfig, content: string, images?: string[]): Promise<string> {
+  // Ollama Cloud can be very slow under load (tens of seconds even for tiny
+  // prompts); vision + long context takes minutes. Generous timeout + 1 retry.
+  const timeoutMs = 300_000;
+  try {
+    return await chatOnce(cfg, content, images, timeoutMs);
+  } catch (e) {
+    console.warn("[ai] first attempt failed, retrying:", (e as Error).message);
+    return await chatOnce(cfg, content, images, timeoutMs);
+  }
 }
 
 function sanitize(raw: unknown[]): ParsedSub[] {
