@@ -8,7 +8,8 @@ import { resolveFavicon } from "@/lib/favicon";
 import { nextPaymentFrom, type BillingCycle } from "@/lib/periods";
 import { notifyMarkedPaid } from "@/lib/notify";
 import { markSubscriptionPaid } from "@/lib/subscriptions";
-import { parseSubscriptionsFromImage, resolveCurrencyId } from "@/lib/ai";
+import { parseSubscriptionsFromImage, resolveCurrencyId, buildAiContext } from "@/lib/ai";
+import { applyParsedAction } from "@/lib/subscriptions";
 import { requireUser } from "@/lib/session";
 
 const CycleEnum = z.enum(["MONTHLY", "QUARTERLY", "YEARLY", "CUSTOM"]);
@@ -30,11 +31,15 @@ const SubSchema = z.object({
 export type SubFormState = { ok: boolean; error?: string; id?: string };
 
 export interface ParsedItem {
+  action?: "add" | "update" | "mark_paid";
+  matchTitle?: string | null;
+  group?: string | null;
+  groupId?: string | null; // resolved existing group (web prefill)
   title: string;
   amount: number;
   currency: string;
   currencyId: string | null;
-  cycle: string;
+  cycle: "MONTHLY" | "QUARTERLY" | "YEARLY" | "CUSTOM";
   every: number;
   unitDays?: number | null;
   url?: string | null;
@@ -51,16 +56,33 @@ export async function parseScreenshot(
     return { ok: false, error: "Файл слишком большой (макс ~7 МБ)" };
   }
   try {
-    const parsed = await parseSubscriptionsFromImage(imageBase64);
+    const ctx = await buildAiContext();
+    const parsed = await parseSubscriptionsFromImage(imageBase64, undefined, ctx);
     if (parsed.length === 0) return { ok: false, error: "Подписки на изображении не найдены" };
+    const groups = await prisma.group.findMany();
     const items: ParsedItem[] = [];
     for (const p of parsed.slice(0, 10)) {
-      items.push({ ...p, currencyId: await resolveCurrencyId(p.currency) });
+      const g = p.group
+        ? groups.find((x) => x.name.toLowerCase() === p.group!.toLowerCase())
+        : null;
+      items.push({ ...p, currencyId: await resolveCurrencyId(p.currency), groupId: g?.id ?? null });
     }
     return { ok: true, items };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
+}
+
+/** Apply one AI draft directly (add / update / mark_paid). */
+export async function applyParsedItem(item: ParsedItem): Promise<{ ok: boolean; message?: string; error?: string }> {
+  await requireUser();
+  const res = await applyParsedAction(item);
+  if ("error" in res) return { ok: false, error: res.error };
+  const verb = res.kind === "added" ? "добавлена" : res.kind === "updated" ? "обновлена" : "закрыта (оплачено)";
+  revalidatePath("/subscriptions");
+  revalidatePath("/dashboard");
+  revalidatePath("/statistics");
+  return { ok: true, message: `«${res.title}» ${verb}` };
 }
 
 export async function createSubscription(

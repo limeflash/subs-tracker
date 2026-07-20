@@ -10,8 +10,8 @@ import {
   type TgUpdate,
   type InlineButton,
 } from "@/lib/telegram";
-import { markSubscriptionPaid, createFromParsed } from "@/lib/subscriptions";
-import { getAiConfig, parseSubscriptionsFromImage, parseSubscriptionsFromText, type ParsedSub } from "@/lib/ai";
+import { markSubscriptionPaid, applyParsedAction } from "@/lib/subscriptions";
+import { getAiConfig, parseSubscriptionsFromImage, parseSubscriptionsFromText, buildAiContext, type ParsedSub } from "@/lib/ai";
 import { convertAmount, monthlyEquivalent } from "@/lib/exchange";
 import { monthRange } from "@/lib/stats";
 import { formatMoney, formatDate } from "@/lib/utils";
@@ -172,7 +172,8 @@ async function handlePhoto(
     });
     if (!res.ok) return send(cfg, "Не удалось скачать изображение.");
     const base64 = Buffer.from(await res.arrayBuffer()).toString("base64");
-    const items = await parseSubscriptionsFromImage(base64, caption);
+    const ctx = await buildAiContext();
+    const items = await parseSubscriptionsFromImage(base64, caption, ctx);
     return presentAiDrafts(cfg, items, caption);
   } catch (e) {
     return send(cfg, `Ошибка распознавания: ${esc((e as Error).message.slice(0, 200))}`);
@@ -184,7 +185,8 @@ async function handleAiText(cfg: TelegramConfig, text: string): Promise<void> {
     return send(cfg, "🤖 AI-импорт не настроен. Добавьте ключ Ollama Cloud в Настройки → AI.");
   }
   try {
-    const items = await parseSubscriptionsFromText(text);
+    const ctx = await buildAiContext();
+    const items = await parseSubscriptionsFromText(text, ctx);
     return presentAiDrafts(cfg, items, text);
   } catch (e) {
     return send(cfg, `Ошибка: ${esc((e as Error).message.slice(0, 200))}`);
@@ -201,14 +203,21 @@ function newPending(items: ParsedSub[]): string {
   return id;
 }
 
+const ACTION_ICON = { add: "➕", update: "🔄", mark_paid: "✅" } as const;
+
 function renderDrafts(pid: string, p: PendingAi): { text: string; keyboard: InlineButton[][] } {
   const lines = p.items.map((it, i) => {
     const done = p.added.has(i) ? " ✅" : "";
-    return `• <b>${esc(it.title)}</b> — ${formatMoney(it.amount, it.currency)} · ${cycleLabel(it)}${done}`;
+    const icon = ACTION_ICON[it.action ?? "add"];
+    const grp = it.group ? ` · 📁 ${esc(it.group)}` : "";
+    return `${icon} <b>${esc(it.title)}</b> — ${formatMoney(it.amount, it.currency)} · ${cycleLabel(it)}${grp}${done}`;
   });
   const keyboard: InlineButton[][] = [];
   p.items.forEach((it, i) => {
-    if (!p.added.has(i)) keyboard.push([{ text: `➕ ${it.title}`, callback_data: `ai:a:${pid}:${i}` }]);
+    if (!p.added.has(i)) {
+      const icon = ACTION_ICON[it.action ?? "add"];
+      keyboard.push([{ text: `${icon} ${it.title}`, callback_data: `ai:a:${pid}:${i}` }]);
+    }
   });
   keyboard.push([{ text: "❌ Отмена", callback_data: `ai:s:${pid}:0` }]);
   return { text: lines.join("\n"), keyboard };
@@ -223,7 +232,7 @@ async function presentAiDrafts(cfg: TelegramConfig, items: ParsedSub[], source?:
   const r = renderDrafts(id, p);
   await send(
     cfg,
-    `🤖 <b>Нашёл ${items.length === 1 ? "подписку" : `подписки (${items.length})`}:</b>\n\n${r.text}\n\nНажмите ➕, чтобы добавить.`,
+    `🤖 <b>Разобрал (${items.length}):</b>\n➕ новая · 🔄 обновить · ✅ закрыть оплату\n\n${r.text}`,
     r.keyboard,
   );
 }
@@ -251,19 +260,20 @@ async function handleAiCallback(
   const idx = parseInt(idxRaw, 10);
   const item = p.items[idx];
   if (!item || p.added.has(idx)) {
-    await answerCallback(cfg, cqId, "Уже добавлено");
+    await answerCallback(cfg, cqId, "Уже обработано");
     return;
   }
-  const res = await createFromParsed(item);
+  const res = await applyParsedAction(item);
   if ("error" in res) {
     await answerCallback(cfg, cqId, res.error);
     return;
   }
   p.added.add(idx);
-  await answerCallback(cfg, cqId, `✅ ${res.title} добавлена`);
+  const verb = res.kind === "added" ? "добавлена" : res.kind === "updated" ? "обновлена" : "закрыта (оплачено)";
+  await answerCallback(cfg, cqId, `✅ ${res.title} — ${verb}`);
   await sendTelegramDirect(
     cfg,
-    `🎉 <b>${esc(res.title)}</b> добавлена — ${formatMoney(res.amount, res.currencyCode)}, следующее списание ${formatDate(res.nextPaymentDate)}.`,
+    `${res.kind === "paid" ? "☑️" : "🎉"} <b>${esc(res.title)}</b> ${verb} — ${formatMoney(res.amount, res.currencyCode)}, следующее списание ${formatDate(res.nextPaymentDate)}.`,
   );
   const allDone = p.added.size >= p.items.length;
   const r = renderDrafts(pid, p);

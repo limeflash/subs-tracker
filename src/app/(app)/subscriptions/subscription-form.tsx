@@ -58,6 +58,7 @@ interface Props {
     billingUnitDays?: number | null;
     startDate?: string;
     notes?: string | null;
+    groupIds?: string[];
   };
 }
 
@@ -69,7 +70,7 @@ export function SubscriptionFormDialog(props: Props) {
   const [favicon, setFavicon] = useState<string | null>(null);
   const [url, setUrl] = useState(d?.url ?? "");
   const [cycle, setCycle] = useState<string>(d?.billingCycle ?? "MONTHLY");
-  const [groupIds, setGroupIds] = useState<string[]>(props.editing?.groupIds ?? []);
+  const [groupIds, setGroupIds] = useState<string[]>(props.editing?.groupIds ?? props.prefill?.groupIds ?? []);
 
   // live favicon preview when URL changes
   useEffect(() => {

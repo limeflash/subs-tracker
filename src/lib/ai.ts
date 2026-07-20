@@ -13,6 +13,9 @@ export interface AiConfig {
 }
 
 export interface ParsedSub {
+  action?: "add" | "update" | "mark_paid";
+  matchTitle?: string | null; // title of the existing subscription this refers to
+  group?: string | null; // group name (existing or suggested)
   title: string;
   amount: number;
   currency: string; // ISO code, e.g. USD
@@ -22,6 +25,35 @@ export interface ParsedSub {
   url?: string | null;
   nextPaymentDate?: string | null; // YYYY-MM-DD
   notes?: string | null;
+}
+
+export interface AiContext {
+  subscriptions: { title: string; amount: number; currency: string; cycle: string; nextPaymentDate: string; groups: string[] }[];
+  groups: string[];
+}
+
+/** Current subscriptions + groups, fed to the model so it can match/update/close. */
+export async function buildAiContext(): Promise<AiContext> {
+  const [subs, groups] = await Promise.all([
+    prisma.subscription.findMany({
+      where: { active: true },
+      include: { currency: true, groups: { include: { group: true } } },
+      orderBy: { title: "asc" },
+      take: 100,
+    }),
+    prisma.group.findMany({ orderBy: { name: "asc" } }),
+  ]);
+  return {
+    subscriptions: subs.map((s) => ({
+      title: s.title,
+      amount: Number(s.amount),
+      currency: s.currency.code,
+      cycle: s.billingCycle,
+      nextPaymentDate: s.nextPaymentDate.toISOString().slice(0, 10),
+      groups: s.groups.map((g) => g.group.name),
+    })),
+    groups: groups.map((g) => g.name),
+  };
 }
 
 const HOST = "https://ollama.com";
@@ -47,27 +79,47 @@ export async function getAiConfig(): Promise<AiConfig | null> {
   return null;
 }
 
-const PROMPT = `Ты — парсер подписок. Из входных данных (скриншот страницы оплаты/подписки или текст) извлеки информацию о подписках.
+const PROMPT = `Ты — ассистент учёта подписок. Тебе дают скриншот или текст (страница оплаты, инвойс, чек, письмо) и список текущих подписок пользователя.
 
-Верни СТРОГО JSON-массив объектов:
+Для каждой позиции определи ДЕЙСТВИЕ и верни СТРОГО JSON-массив:
 [{
+  "action": "add" | "update" | "mark_paid",
+  "matchTitle": "точное название существующей подписки из списка (для update/mark_paid), иначе null",
   "title": "название сервиса",
   "amount": 9.99,
   "currency": "ISO-код валюты: USD, EUR, RUB, TRY, GBP...",
   "cycle": "MONTHLY | QUARTERLY | YEARLY | CUSTOM",
   "every": 1,
   "unitDays": null,
-  "url": "сайт сервиса или null",
+  "url": "официальный сайт сервиса (впиши, если знаешь), иначе null",
   "nextPaymentDate": "YYYY-MM-DD или null",
-  "notes": "короткая заметка или null"
+  "notes": "короткая заметка или null",
+  "group": "подходящая группа из списка пользователя или новое короткое название, иначе null"
 }]
 
-Правила:
+Правила выбора действия:
+- "mark_paid" — на скриншоте оплата/инвойс/чек/письмо об успешном платеже (Paid, receipt, invoice paid) по подписке, которая УЖЕ есть в списке пользователя.
+- "update" — подписка уже есть в списке, но изменились цена, период или дата следующего платежа.
+- "add" — такой подписки в списке нет.
+
+Остальные правила:
 - "каждый месяц/ежемесячно/monthly" → MONTHLY, every=1; "раз в год/yearly/annually" → YEARLY; "каждые 3 месяца" → QUARTERLY или MONTHLY с every=3; "раз в N дней" → CUSTOM с unitDays=N.
-- Если пользователь дал пояснение к скриншоту (подпись/текст) — это важный контекст: используй его, чтобы понять, какая подписка нужна и как её назвать, и сохрани пояснение в "notes".
-- Если дата следующего платежа не видна — null. Если видна дата следующего продления/renewal — используй её.
-- Если на скриншоте несколько подписок/тарифов, но пользователь в пояснении указал одну — верни только её.
+- Пояснение пользователя (подпись/текст) — важный контекст: оно уточняет, какая подписка нужна и как её назвать; сохрани его в "notes".
+- Дата следующего платежа: дата renewal/следующего списания/due date. Если не видна — null.
+- Если на скриншоте несколько позиций, но пользователь в пояснении указал одну — верни только её. Если позиций несколько и все нужны — верни все (например, строки инвойса могут быть одной подпиской с общей суммой Total).
+- "group": выбирай по смыслу (хостинг/VPS → инфраструктура/хостинг; музыка/видео → развлечения и т.п.) из существующих групп пользователя, либо предложи новую.
 - Только JSON, без пояснений. Если подписок нет — верни [].`;
+
+function contextBlock(ctx?: AiContext): string {
+  if (!ctx) return "";
+  const subs = ctx.subscriptions.length
+    ? ctx.subscriptions
+        .map((s) => `- ${s.title}: ${s.amount} ${s.currency}, ${s.cycle}, след. ${s.nextPaymentDate}${s.groups.length ? ` [${s.groups.join(", ")}]` : ""}`)
+        .join("\n")
+    : "(пусто)";
+  const groups = ctx.groups.length ? ctx.groups.join(", ") : "(нет групп)";
+  return `\n\nТекущие подписки пользователя:\n${subs}\n\nГруппы пользователя: ${groups}`;
+}
 
 async function chat(cfg: AiConfig, content: string, images?: string[]): Promise<string> {
   const res = await fetch(`${HOST}/api/chat`, {
@@ -103,14 +155,20 @@ function sanitize(raw: unknown[]): ParsedSub[] {
     const o = item as Record<string, unknown>;
     const title = String(o.title ?? "").trim().slice(0, 200);
     const amount = Number(o.amount);
-    if (!title || !isFinite(amount) || amount <= 0) continue;
+    if (!title || !isFinite(amount) || amount < 0) continue;
     const cycleRaw = String(o.cycle ?? "MONTHLY").toUpperCase();
     const cycle = (["MONTHLY", "QUARTERLY", "YEARLY", "CUSTOM"] as const).includes(cycleRaw as never)
       ? (cycleRaw as ParsedSub["cycle"])
       : "MONTHLY";
     const every = Math.max(1, Math.min(365, parseInt(String(o.every ?? 1), 10) || 1));
     const currency = String(o.currency ?? "USD").trim().toUpperCase().replace(/[^A-Z]/g, "").slice(0, 5) || "USD";
+    const actionRaw = String(o.action ?? "add").toLowerCase();
     out.push({
+      action: (["add", "update", "mark_paid"] as const).includes(actionRaw as never)
+        ? (actionRaw as ParsedSub["action"])
+        : "add",
+      matchTitle: o.matchTitle ? String(o.matchTitle).slice(0, 200) : null,
+      group: o.group ? String(o.group).trim().slice(0, 100) || null : null,
       title,
       amount: Math.round(amount * 100) / 100,
       currency,
@@ -153,24 +211,28 @@ function extractJsonArray(text: string): unknown[] {
   return [];
 }
 
-export async function parseSubscriptionsFromImage(imageBase64: string, caption?: string): Promise<ParsedSub[]> {
+export async function parseSubscriptionsFromImage(
+  imageBase64: string,
+  caption?: string,
+  ctx?: AiContext,
+): Promise<ParsedSub[]> {
   const cfg = await getAiConfig();
   if (!cfg) throw new Error("AI не настроен — добавьте ключ Ollama Cloud в Настройках");
   const content = await chat(
     cfg,
-    caption?.trim()
-      ? `Извлеки подписки со скриншота. Пояснение пользователя: «${caption.trim().slice(0, 500)}»`
-      : "Извлеки подписки со скриншота.",
+    (caption?.trim()
+      ? `Разбери скриншот. Пояснение пользователя: «${caption.trim().slice(0, 500)}»`
+      : "Разбери скриншот.") + contextBlock(ctx),
     [imageBase64],
   );
   return sanitize(extractJsonArray(content));
 }
 
-export async function parseSubscriptionsFromText(text: string): Promise<ParsedSub[]> {
+export async function parseSubscriptionsFromText(text: string, ctx?: AiContext): Promise<ParsedSub[]> {
   const cfg = await getAiConfig();
   if (!cfg) throw new Error("AI не настроен");
   const today = new Date().toISOString().slice(0, 10);
-  const content = await chat(cfg, `Сегодня ${today}. Текст пользователя: «${text.slice(0, 1000)}»`);
+  const content = await chat(cfg, `Сегодня ${today}. Текст пользователя: «${text.slice(0, 1000)}»${contextBlock(ctx)}`);
   return sanitize(extractJsonArray(content));
 }
 
